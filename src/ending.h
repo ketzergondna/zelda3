@@ -28,6 +28,7 @@ void Intro_FadeInBg();
 void Intro_SwordComingDown();
 void Intro_WaitPlayer();
 void FadeMusicAndResetSRAMMirror();
+void Intro_SkipToTitleScreen();
 void Intro_InitializeTriforcePolyThread();
 void Intro_InitGfx_Helper();
 void LoadTriforceSpritePalette();

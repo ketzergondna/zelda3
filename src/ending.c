@@ -503,10 +503,42 @@ void Polyhedral_InitializeThread() {  // 89f7de
   memcpy(&g_ram[0x1f32], kPolyThreadInit, 13);
 }
 
+// SkipIntroToTitle: the triforce, logo, sword and background fade-in are still running.
+// 11 is the triforce replayed after the attract demo.
+static bool Intro_IsTitleAnimationRunning() {
+  switch (submodule_index) {
+  case 3: case 4: case 5: case 6: case 11: return true;
+  case 7: return BYTE(palette_filter_countdown) != 0;
+  }
+  return false;
+}
+
 void Module00_Intro() {  // 8cc120
   uint8 skip_at = enhanced_features0 & kFeatures0_SkipIntroOnKeypress ? 4 : 8;
+  bool pressed = ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0) != 0;
 
-  if (submodule_index >= skip_at && ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)) {
+  if (enhanced_features0 & kFeatures0_SkipIntroToTitle) {
+    // Wins over SkipIntroOnKeypress: the first key press only completes the title screen,
+    // and only the finished title screen goes to the file select screen.
+    if (pressed && Intro_IsTitleAnimationRunning()) {
+      Intro_SkipToTitleScreen();
+      return;
+    }
+    if (pressed && submodule_index == 8) {
+      FadeMusicAndResetSRAMMirror();
+      return;
+    }
+    // Hold the title like Intro_WaitPlayer, without its countdown, so the title music
+    // plays as long as in the natural flow before the attract demo.
+    if (submodule_index == 8 && intro_title_extra_wait) {
+      intro_title_extra_wait--;
+      Intro_HandleAllTriforceAnimations();
+      intro_did_run_step = 0;
+      is_nmi_thread_active = 0;
+      Intro_PeriodicSwordAndIntroFlash();
+      return;
+    }
+  } else if (submodule_index >= skip_at && pressed) {
     FadeMusicAndResetSRAMMirror();
     return;
   }
@@ -660,6 +692,82 @@ void FadeMusicAndResetSRAMMirror() {  // 8cc2f0
   main_module_index = 1;
   death_var4 = 1;
   submodule_index = 0;
+}
+
+// SkipIntroToTitle: puts the intro in the state it reaches by itself once the background
+// has faded in (submodule 7, fade done), whatever step of the animation it was in.
+void Intro_SkipToTitleScreen() {
+  static const uint8 kTriangle_X[3] = { 75, 95, 117 };  // kIntroSprite0_XLimit
+  static const uint8 kTriangle_Y[3] = { 88, 48, 88 };   // kIntroSprite0_YLimit
+
+  // Triforce: last step, flat and full size. Submodule 7 keeps the poly renderer running,
+  // so it redraws the flat triforce by itself.
+  intro_step_index = 5;
+  intro_step_timer = 0;
+  poly_config1 = 0;
+  poly_a = 0;
+  poly_b = 0;
+  for (int k = 0; k < 3; k++) {
+    intro_sprite_isinited[k] = 2;
+    intro_sprite_subtype[k] = 0;
+    intro_x_lo[k] = kTriangle_X[k];
+    intro_x_hi[k] = 0;
+    intro_y_lo[k] = kTriangle_Y[k];
+    intro_y_hi[k] = 0;
+    intro_x_vel[k] = 0;
+    intro_y_vel[k] = 0;
+  }
+
+  // Copyright (InitializeSceneSprite_Copyright) and sparkle (spawned by Intro_RunStep)
+  intro_sprite_isinited[4] = 2;
+  intro_sprite_subtype[4] = 2;
+  intro_x_lo[4] = 76;
+  intro_x_hi[4] = 0;
+  intro_y_lo[4] = 184;
+  intro_y_hi[4] = 0;
+  if (intro_sprite_isinited[5] != 2) {
+    intro_sprite_isinited[5] = 1;
+    intro_sprite_subtype[5] = 3;
+  }
+
+  // Sword stuck in the ground with its sparkles finished (Intro_PeriodicSwordAndIntroFlash)
+  intro_sword_ypos = 30;
+  intro_sword_18 = 0;
+  intro_sword_19 = 8;
+  intro_sword_20 = 4;
+  intro_sword_21 = 0x58;
+  WORD(intro_sword_24) = 0;
+  intro_times_pal_flash = 0;
+  SetBackdropcolorBlack();
+
+  // Logo tilemap (end of Intro_RunStep) and palettes as the fades leave them
+  nmi_load_bg_from_vram = 3;
+  memcpy(main_palette_buffer + 0x20, aux_palette_buffer + 0x20, (0xd0 - 0x20) * sizeof(uint16));
+  flag_update_cgram_in_nmi++;
+  palette_filter_countdown = 0;
+
+  // Layers and color math (IntroZeldaFadein, Intro_SwordComingDown)
+  TM_copy = 0x15;
+  TS_copy = 2;
+  CGWSEL_copy = 2;
+  CGADSUB_copy = 0x22;
+  INIDISP_copy = 15;
+
+  // Title music, unless it's already playing. In the natural flow the music starts
+  // 498 frames before this point, so wait that much longer before the attract demo.
+  if (music_unk1 != 1) {
+    music_control = 1;
+    intro_title_extra_wait = 498;
+  } else {
+    intro_title_extra_wait = 0;
+  }
+
+  submodule_index = 7;
+  subsubmodule_index = 0;
+
+  // Draw this frame like Intro_FadeInBg, without its key check
+  Intro_PeriodicSwordAndIntroFlash();
+  Intro_HandleAllTriforceAnimations();
 }
 
 void Intro_InitializeTriforcePolyThread() {  // 8cc33c

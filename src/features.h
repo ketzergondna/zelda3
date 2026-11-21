@@ -53,6 +53,9 @@ enum {
 
   // Hold A to speed up text, press B to show text until the next stop
   kFeatures0_TextSpeedButtons = 524288,
+
+  // A key press during the intro animation jumps to the finished title screen
+  kFeatures0_SkipIntroToTitle = 1048576,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))
@@ -63,6 +66,8 @@ enum {
 #define hud_cur_item_x (*(uint8*)(g_ram+0x656))
 #define hud_cur_item_l (*(uint8*)(g_ram+0x657))
 #define hud_cur_item_r (*(uint8*)(g_ram+0x658))
+// SkipIntroToTitle: frames left to wait before the attract demo when the skip started the title music
+#define intro_title_extra_wait (*(uint16*)(g_ram+0x659))
 
 
 
