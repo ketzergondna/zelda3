@@ -2380,13 +2380,97 @@ void RenderText_Draw_CharacterTilemap() {  // 8ec97d
   text_render_state++;
 }
 
+// TextSpeed / TextSpeedButtons features. None of these apply in the intro story (module 20).
+static uint32 Text_GetSpeedFeatures() {
+  return (main_module_index == 20) ? 0 : enhanced_features0 &
+      (kFeatures0_TextSpeedFast | kFeatures0_TextSpeedInstant | kFeatures0_TextSpeedButtons);
+}
+
+// Messages that set their own [Speed] of 1 or more (telepathy, ending...) are
+// dramatic and keep their original pacing with TextSpeed = fast.
+static bool Text_IsDramaticMessage() {
+  return vwf_line_speed >= 1;
+}
+
+static bool Text_IsFastActive() {
+  uint32 f = Text_GetSpeedFeatures();
+  return ((f & kFeatures0_TextSpeedFast) && !Text_IsDramaticMessage()) ||
+         ((f & kFeatures0_TextSpeedButtons) && (joypad1L_last & 0x80));  // A held
+}
+
+static bool Text_IsInstantActive() {
+  uint32 f = Text_GetSpeedFeatures();
+  return (f & kFeatures0_TextSpeedInstant) ||
+         ((f & kFeatures0_TextSpeedButtons) && (filtered_joypad_H & 0x80));  // B pressed
+}
+
+// Scroll a whole line in one go
+static bool Text_ScrollFullLine() {
+  for (int i = 0; i < 16; i++) {
+    if (RenderText_Draw_Scroll())
+      return true;
+  }
+  return false;
+}
+
+// Process text up to the next command that needs the player (key press, choice, end)
+// or a picture change. [Wait] is skipped. Returns true if anything was processed.
+static bool Text_SkipToNextStop() {
+  uint16 start_pos = dialogue_msg_read_pos;
+  for (int steps = 0; steps < 1024; steps++) {
+    uint32 cmd = Text_DecodeCmd(messaging_text_buffer[dialogue_msg_read_pos],
+        &messaging_text_buffer[dialogue_msg_read_pos + 1]);
+    switch (TEXTCMD_CMD(cmd)) {
+    case kTextCmd_IsLetter:
+      VWF_RenderSingle(TEXTCMD_PARAM(cmd));
+      break;
+    case kTextCmd_ScrollSpd:
+      dialogue_scroll_speed = TEXTCMD_PARAM(cmd);
+      break;
+    case kTextCmd_Scroll:
+      if (!Text_ScrollFullLine())
+        return true;
+      break;
+    case kTextCmd_1:
+    case kTextCmd_2:
+    case kTextCmd_3:
+      vwf_curline = kVWF_RowPositions[TEXTCMD_CMD(cmd) - kTextCmd_1];
+      vwf_flag_next_line = 1;
+      break;
+    case kTextCmd_Wait:
+      text_wait_countdown = 0;
+      break;
+    case kTextCmd_Sound:
+      sound_effect_2 = TEXTCMD_PARAM(cmd);
+      break;
+    case kTextCmd_Speed:
+      vwf_line_speed = vwf_line_speed_cur = TEXTCMD_PARAM(cmd);
+      break;
+    default:
+      // Waitkey, Choose*, Item, EndMessage, NextPic: stop here
+      return dialogue_msg_read_pos != start_pos;
+    }
+    dialogue_msg_read_pos += 1 + TEXTCMD_MULTIBYTE(cmd);
+  }
+  return true;
+}
+
 void RenderText_Draw_MessageCharacters() {  // 8ec984
+  // The stop command is only handled on the next frame, so the button
+  // press that skipped the text can't also answer the stop.
+  if (Text_IsInstantActive() && Text_SkipToNextStop()) {
+    nmi_subroutine_index = 2;
+    nmi_disable_core_updates = 2;
+    return;
+  }
 RESTART:;
   uint32 cmd = Text_DecodeCmd(messaging_text_buffer[dialogue_msg_read_pos],
       &messaging_text_buffer[dialogue_msg_read_pos + 1]);
 
   switch (TEXTCMD_CMD(cmd)) {
   case kTextCmd_IsLetter:
+    if (vwf_line_speed_cur >= 2 && Text_IsFastActive())
+      vwf_line_speed_cur = 1;
     if (vwf_line_speed_cur >= 2) {
       vwf_line_speed_cur--;
       break;
@@ -2438,7 +2522,7 @@ RESTART:;
     RenderText_Draw_Choose1Or2();
     break;
   case kTextCmd_Scroll:  // RenderText_Draw_Scroll
-    if (RenderText_Draw_Scroll())
+    if (Text_IsFastActive() ? Text_ScrollFullLine() : RenderText_Draw_Scroll())
       goto COMMAND_DONE;
     break;
   case kTextCmd_1:  //
@@ -2451,6 +2535,8 @@ RESTART:;
     switch (joypad1L_last & 0x80 ? 1 : text_wait_countdown) {
     case 0:
       text_wait_countdown = kText_WaitDurations[TEXTCMD_PARAM(cmd)] - 1;
+      if (Text_IsFastActive())
+        text_wait_countdown = kText_WaitDurations[TEXTCMD_PARAM(cmd)] / 2 - 1;
       break;
     case 1:
       BYTE(text_wait_countdown) = 0;

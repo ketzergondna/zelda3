@@ -475,6 +475,17 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_GameChangingBugFixes);
     } else if (StringEqualsNoCase(key, "CancelBirdTravel")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_CancelBirdTravel);
+    } else if (StringEqualsNoCase(key, "TextSpeed")) {
+      g_config.features0 &= ~(kFeatures0_TextSpeedFast | kFeatures0_TextSpeedInstant);
+      if (StringEqualsNoCase(value, "fast"))
+        g_config.features0 |= kFeatures0_TextSpeedFast;
+      else if (StringEqualsNoCase(value, "instant"))
+        g_config.features0 |= kFeatures0_TextSpeedInstant;
+      else if (!StringEqualsNoCase(value, "normal"))
+        return false;
+      return true;
+    } else if (StringEqualsNoCase(key, "TextSpeedButtons")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_TextSpeedButtons);
     }
   }
   return false;

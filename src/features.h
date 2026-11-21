@@ -46,6 +46,13 @@ enum {
   kFeatures0_SwitchLRLimit = 32768,
 
   kFeatures0_DimFlashes = 65536,
+
+  // TextSpeed: neither bit set = normal (original behavior)
+  kFeatures0_TextSpeedFast = 131072,
+  kFeatures0_TextSpeedInstant = 262144,
+
+  // Hold A to speed up text, press B to show text until the next stop
+  kFeatures0_TextSpeedButtons = 524288,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))
