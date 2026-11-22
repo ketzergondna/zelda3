@@ -172,6 +172,9 @@
     <ClCompile Include="src\ending.c">
       <Filter>Zelda</Filter>
     </ClCompile>
+    <ClCompile Include="src\frame_dump.c">
+      <Filter>Zelda</Filter>
+    </ClCompile>
     <ClCompile Include="src\glsl_shader.c">
       <Filter>Zelda</Filter>
     </ClCompile>
@@ -373,6 +376,9 @@
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\features.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
+    <ClInclude Include="src\frame_dump.h">
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\glsl_shader.h">

@@ -26,6 +26,7 @@
 #include "load_gfx.h"
 #include "util.h"
 #include "audio.h"
+#include "frame_dump.h"
 
 static bool g_run_without_emu = 0;
 
@@ -146,17 +147,31 @@ static SDL_HitTestResult HitTestCallback(SDL_Window *win, const SDL_Point *pt, v
 
 static void DrawPpuFrameWithPerf() {
   int render_scale = PpuGetCurrentRenderScale(g_zenv.ppu, g_ppu_render_flags);
+  int width = g_snes_width * render_scale, height = g_snes_height * render_scale;
   uint8 *pixel_buffer = 0;
   int pitch = 0;
 
-  g_renderer_funcs.BeginDraw(g_snes_width * render_scale,
-                             g_snes_height * render_scale,
-                             &pixel_buffer, &pitch);
+  g_renderer_funcs.BeginDraw(width, height, &pixel_buffer, &pitch);
+
+  // On a frame dump the PPU draws into our own buffer, since the locked texture
+  // is write-only, and the result is copied into the texture afterwards.
+  uint8 *draw_buffer = pixel_buffer;
+  int draw_pitch = pitch;
+  bool dump_frame = false;
+  if (FrameDump_IsPending()) {
+    uint8 *dump_buffer = FrameDump_GetScreenBuffer(width, height);
+    if (dump_buffer) {
+      draw_buffer = dump_buffer;
+      draw_pitch = width * 4;
+      dump_frame = true;
+    }
+  }
+
   if (g_display_perf || g_config.display_perf_title) {
     static float history[64], average;
     static int history_pos;
     uint64 before = SDL_GetPerformanceCounter();
-    ZeldaDrawPpuFrame(pixel_buffer, pitch, g_ppu_render_flags);
+    ZeldaDrawPpuFrame(draw_buffer, draw_pitch, g_ppu_render_flags);
     uint64 after = SDL_GetPerformanceCounter();
     float v = (double)SDL_GetPerformanceFrequency() / (after - before);
     average += v - history[history_pos];
@@ -164,11 +179,18 @@ static void DrawPpuFrameWithPerf() {
     history_pos = (history_pos + 1) & 63;
     g_curr_fps = average * (1.0f / 64);
   } else {
-    ZeldaDrawPpuFrame(pixel_buffer, pitch, g_ppu_render_flags);
+    ZeldaDrawPpuFrame(draw_buffer, draw_pitch, g_ppu_render_flags);
+  }
+  if (dump_frame && pixel_buffer) {
+    for (int y = 0; y < height; y++)
+      memcpy(pixel_buffer + (size_t)y * pitch, draw_buffer + (size_t)y * draw_pitch, draw_pitch);
   }
   if (g_display_perf)
     RenderNumber(pixel_buffer + pitch * render_scale, pitch, g_curr_fps, render_scale == 4);
   g_renderer_funcs.EndDraw();
+
+  if (dump_frame)
+    FrameDump_Write(draw_buffer, width, height, draw_pitch, render_scale);
 }
 
 static SDL_mutex *g_audio_mutex;
@@ -574,6 +596,13 @@ static void HandleCommand(uint32 j, bool pressed) {
 
   if (j == kKeys_Turbo) {
     g_turbo = pressed;
+    return;
+  }
+
+  // Only raise a flag, the dump happens after the next drawn frame
+  if (j == kKeys_DumpFrame) {
+    if (pressed)
+      FrameDump_Request();
     return;
   }
 
