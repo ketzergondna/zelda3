@@ -223,7 +223,7 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   int room = dungeon_room_index;
 
   fprintf(f, "{\n");
-  fprintf(f, "  \"version\": 1,\n");
+  fprintf(f, "  \"version\": 2,\n");
   fprintf(f, "  \"frame\": %d,\n", frame_ctr_dbg);
   fprintf(f, "  \"module\": %d, \"submodule\": %d,\n", main_module_index, submodule_index);
   fprintf(f, "  \"indoors\": %s,\n", player_is_indoors ? "true" : "false");
@@ -233,8 +233,12 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
     fprintf(f, "  \"warning\": null,\n");
   fprintf(f, "  \"room\": { \"id\": %d, \"origin\": [%d, %d] },\n",
           room, (room & 0xf) * 512, ((room & 0xff0) >> 4) * 512);
-  fprintf(f, "  \"screen\": { \"file\": \"screen.png\", \"width\": %d, \"height\": %d, \"render_scale\": %d, \"extra_left\": %d },\n",
-          width, height, render_scale, ppu->extraLeftRight);
+  // visible: extra space actually drawn this frame (ConfigurePpuSideSpace clips it to the
+  // room's camera bounds); the rest of the extra_left strips and of the bottom stays black.
+  fprintf(f, "  \"screen\": { \"file\": \"screen.png\", \"width\": %d, \"height\": %d, \"render_scale\": %d, \"extra_left\": %d,\n"
+          "    \"visible\": { \"left\": %d, \"right\": %d, \"bottom\": %d } },\n",
+          width, height, render_scale, ppu->extraLeftRight,
+          ppu->extraLeftCur, ppu->extraRightCur, ppu->extraBottomCur);
   fprintf(f, "  \"camera\": {\n");
   fprintf(f, "    \"bg1\": { \"hofs\": %d, \"vofs\": %d },\n", BG1HOFS_copy, BG1VOFS_copy);
   fprintf(f, "    \"bg2\": { \"hofs\": %d, \"vofs\": %d },\n", BG2HOFS_copy, BG2VOFS_copy);
