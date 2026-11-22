@@ -230,6 +230,7 @@
     <ClCompile Include="src\config.c" />
     <ClCompile Include="src\dungeon.c" />
     <ClCompile Include="src\ending.c" />
+    <ClCompile Include="src\frame_dump.c" />
     <ClCompile Include="src\glsl_shader.c" />
     <ClCompile Include="src\hud.c" />
     <ClCompile Include="src\load_gfx.c" />
@@ -448,6 +449,7 @@
     <ClInclude Include="src\dungeon.h" />
     <ClInclude Include="src\ending.h" />
     <ClInclude Include="src\features.h" />
+    <ClInclude Include="src\frame_dump.h" />
     <ClInclude Include="src\glsl_shader.h" />
     <ClInclude Include="src\hud.h" />
     <ClInclude Include="src\load_gfx.h" />
