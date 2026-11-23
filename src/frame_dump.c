@@ -1,9 +1,12 @@
 // Frame dump for the 3D viewer. See frame_dump.h and the "Formato de datos"
 // section of CLAUDE.md for the file format.
 // Everything here only reads emulated memory, so it can't change game behavior.
+// The one exception is the room object replay, which runs Dungeon_LoadRoom on
+// the live g_ram and then restores all of it (see FrameDump_CaptureRoomObjects).
 #include "frame_dump.h"
 #include "zelda_rtl.h"
 #include "variables.h"
+#include "dungeon.h"
 #include "snes/ppu.h"
 #include <stdio.h>
 #include <string.h>
@@ -70,6 +73,132 @@ uint8 *FrameDump_GetScreenBuffer(int width, int height) {
     g_frame_dump_pending = false;
   }
   return g_frame_dump_screen;
+}
+
+// --- Room objects: sandbox replay of Dungeon_LoadRoom ---
+// Layer index 0 is dung_bg1 ($7E4000, "bg1" in frame.json), 1 is dung_bg2
+// ($7E2000, "bg2"). Note that dungeon.c's kDungeon_DrawObjectOffsets_BG1 points
+// at $7E2000, so the log records the buffer that really changed.
+
+enum {
+  kRoomLogCells = 64 * 64,
+  kRoomLogMaxEntries = 1024,
+  kRoomLogMaxChanges = 65536,
+};
+
+typedef struct RoomLogEntry {
+  uint8 kind, pass, len, raw[3];
+  int change_start, change_count;  // range in RoomLog.changes
+} RoomLogEntry;
+
+typedef struct RoomLog {
+  bool valid;
+  bool overflow;     // too many entries or changed cells, the log is incomplete
+  bool ram_restored; // g_ram is byte for byte what it was before the replay
+  uint32 checksum_before, checksum_after;
+  int room, layout;
+  int pass;
+  int open;          // entry between RoomLog_Begin and RoomLog_End, or -1
+  int num_entries, num_changes;
+  RoomLogEntry entries[kRoomLogMaxEntries];
+  uint16 changes[kRoomLogMaxChanges];  // layer << 12 | cell, in drawing order
+  int16 owner[2][kRoomLogCells];       // last entry that changed each cell, -1 = none
+  uint16 before[2][kRoomLogCells];     // tilemaps before the open entry was drawn
+  uint16 live[2][kRoomLogCells];       // tilemaps of the frame being dumped
+  uint16 loaded[2][kRoomLogCells];     // tilemaps right after the replayed load
+} RoomLog;
+
+bool g_room_log_active;
+static RoomLog g_room_log;
+static uint8 g_room_log_saved_ram[sizeof(g_ram)];
+
+static uint16 *RoomLogLayer(int layer) {
+  return layer ? dung_bg2 : dung_bg1;
+}
+
+static uint32 Fnv1a(const uint8 *data, size_t size) {
+  uint32 h = 2166136261u;
+  for (size_t i = 0; i < size; i++)
+    h = (h ^ data[i]) * 16777619u;
+  return h;
+}
+
+void RoomLog_SetPass(int pass) {
+  g_room_log.pass = pass;
+}
+
+void RoomLog_Begin(int kind, const uint8 *raw, int len) {
+  RoomLog *log = &g_room_log;
+  if (log->open >= 0)
+    return;  // not expected: entries don't draw other entries
+  if (log->num_entries == kRoomLogMaxEntries) {
+    log->overflow = true;
+    return;
+  }
+  RoomLogEntry *e = &log->entries[log->num_entries];
+  e->kind = kind;
+  e->pass = log->pass;
+  e->len = len;
+  memcpy(e->raw, raw, len);
+  for (int layer = 0; layer < 2; layer++)
+    memcpy(log->before[layer], RoomLogLayer(layer), sizeof(log->before[layer]));
+  log->open = log->num_entries;
+}
+
+void RoomLog_End() {
+  RoomLog *log = &g_room_log;
+  if (log->open < 0)
+    return;
+  RoomLogEntry *e = &log->entries[log->open];
+  e->change_start = log->num_changes;
+  for (int layer = 0; layer < 2; layer++) {
+    const uint16 *now = RoomLogLayer(layer);
+    for (int i = 0; i < kRoomLogCells; i++) {
+      if (now[i] == log->before[layer][i])
+        continue;
+      if (log->num_changes == kRoomLogMaxChanges) {
+        log->overflow = true;
+        continue;
+      }
+      log->changes[log->num_changes++] = layer << 12 | i;
+      log->owner[layer][i] = log->open;
+    }
+  }
+  e->change_count = log->num_changes - e->change_start;
+  log->num_entries++;
+  log->open = -1;
+}
+
+void FrameDump_CaptureRoomObjects() {
+  RoomLog *log = &g_room_log;
+  log->valid = false;
+  if (!player_is_indoors)
+    return;
+  memcpy(g_room_log_saved_ram, g_ram, sizeof(g_ram));
+  log->checksum_before = Fnv1a(g_ram, sizeof(g_ram));
+  for (int layer = 0; layer < 2; layer++) {
+    memcpy(log->live[layer], RoomLogLayer(layer), sizeof(log->live[layer]));
+    for (int i = 0; i < kRoomLogCells; i++)
+      log->owner[layer][i] = -1;
+  }
+  log->overflow = false;
+  log->pass = kRoomLogPass_Layout;
+  log->open = -1;
+  log->num_entries = log->num_changes = 0;
+
+  g_room_log_active = true;
+  Dungeon_LoadRoom();
+  g_room_log_active = false;
+
+  for (int layer = 0; layer < 2; layer++)
+    memcpy(log->loaded[layer], RoomLogLayer(layer), sizeof(log->loaded[layer]));
+  log->room = dungeon_room_index;
+  log->layout = dung_layout_and_starting_quadrant >> 2;
+
+  memcpy(g_ram, g_room_log_saved_ram, sizeof(g_ram));
+  log->checksum_after = Fnv1a(g_ram, sizeof(g_ram));
+  log->ram_restored = memcmp(g_ram, g_room_log_saved_ram, sizeof(g_ram)) == 0;
+  log->valid = true;
 }
 
 static void Bgr555ToRgba(uint16 c, uint8 *dst) {
@@ -215,6 +344,129 @@ static void WriteJsonOam(FILE *f) {
   fprintf(f, "\n  ]\n");
 }
 
+// Writes the cells of |changes| (sorted by layer, then cell) that belong to
+// |layer| as runs [row, first x, last x].
+static void WriteJsonRuns(FILE *f, const uint16 *changes, int count, int layer) {
+  bool first = true;
+  fputc('[', f);
+  for (int k = 0; k < count;) {
+    int c = changes[k++];
+    if ((c >> 12) != layer)
+      continue;
+    int y = (c >> 6) & 63, x0 = c & 63, x1 = x0;
+    while (k < count && x1 + 1 < 64 && changes[k] == (layer << 12 | y << 6 | (x1 + 1)))
+      x1++, k++;
+    fprintf(f, "%s[%d, %d, %d]", first ? "" : ", ", y, x0, x1);
+    first = false;
+  }
+  fputc(']', f);
+}
+
+static void WriteJsonRoomEntry(FILE *f, const RoomLog *log, int i) {
+  static const char *const kKinds[] = { "object", "door", "block", "torch" };
+  static const char *const kPasses[] = { "layout", "layer1", "layer2", "layer3", "extra" };
+  const RoomLogEntry *e = &log->entries[i];
+  const uint8 *raw = e->raw;
+  fprintf(f, "\n      { \"i\": %d, \"kind\": \"%s\", \"pass\": \"%s\", \"raw\": \"", i, kKinds[e->kind], kPasses[e->pass]);
+  for (int k = 0; k < e->len; k++)
+    fprintf(f, k ? " %.2X" : "%.2X", raw[k]);
+  fprintf(f, "\", ");
+  uint16 r0 = raw[0] | raw[1] << 8;
+  if (e->kind == kRoomLog_Object) {
+    // Same decoding as RoomData_DrawObject. Ids follow assets/tables.py:
+    // subtype 1 = 0x00-0xF7, subtype 2 = 0x100-0x13F, subtype 3 = 0xF80-0xFFF.
+    uint8 idx = raw[2];
+    if ((r0 & 0xfc) != 0xfc) {
+      int x = (uint8)r0 >> 2, y = r0 >> 10, w = r0 & 3, h = (r0 >> 8) & 3;
+      if (idx < 0xf8)
+        fprintf(f, "\"subtype\": 1, \"id\": %d, \"x\": %d, \"y\": %d, \"size\": [%d, %d], ", idx, x, y, w, h);
+      else
+        fprintf(f, "\"subtype\": 3, \"id\": %d, \"x\": %d, \"y\": %d, \"size\": null, ",
+                0xf80 + ((idx & 7) << 4 | h << 2 | w), x, y);
+    } else {
+      int x = (r0 & 3) << 4 | (r0 >> 12) & 0xf, y = ((r0 >> 8) & 0xf) << 2 | idx >> 6;
+      fprintf(f, "\"subtype\": 2, \"id\": %d, \"x\": %d, \"y\": %d, \"size\": null, ", 0x100 + (idx & 0x3f), x, y);
+    }
+  } else if (e->kind == kRoomLog_Door) {
+    // Same decoding as RoomData_DrawObject_Door. dir: 0 north, 1 south, 2 west, 3 east.
+    fprintf(f, "\"door\": { \"type\": %d, \"pos\": %d, \"dir\": %d }, ", r0 >> 8, (r0 >> 4) & 0xf, r0 & 3);
+  } else {
+    // Blocks and torches store a tilemap offset * 2 (DstoPtr((v >> 1) & 0x1fff)).
+    int cell = (r0 >> 1) & 0x1fff;
+    fprintf(f, "\"x\": %d, \"y\": %d, ", cell & 63, (cell >> 6) & 63);
+    if (e->kind == kRoomLog_Torch)
+      fprintf(f, "\"lit\": %s, ", (r0 & 0x8000) ? "true" : "false");
+  }
+  const uint16 *changes = log->changes + e->change_start;
+  int visible = 0;
+  for (int k = 0; k < e->change_count; k++)
+    visible += log->owner[changes[k] >> 12][changes[k] & 0xfff] == i;
+  fprintf(f, "\"cells\": { \"bg1\": ");
+  WriteJsonRuns(f, changes, e->change_count, 0);
+  fprintf(f, ", \"bg2\": ");
+  WriteJsonRuns(f, changes, e->change_count, 1);
+  fprintf(f, " }, \"changed\": %d, \"visible\": %d }", e->change_count, visible);
+}
+
+// "room_objects": what the replayed Dungeon_LoadRoom drew, entry by entry, in
+// drawing order. See "Formato de datos" in CLAUDE.md.
+static void WriteJsonRoomObjects(FILE *f) {
+  const RoomLog *log = &g_room_log;
+  if (!log->valid || log->room != dungeon_room_index) {
+    fprintf(f, "  \"room_objects\": null,\n");
+    return;
+  }
+  fprintf(f, "  \"room_objects\": {\n");
+  fprintf(f, "    \"room\": %d, \"layout\": %d, \"method\": \"replay\",\n", log->room, log->layout);
+  fprintf(f, "    \"ram_checksum\": { \"before\": \"%.8X\", \"after\": \"%.8X\", \"restored\": %s },\n",
+          log->checksum_before, log->checksum_after, log->ram_restored ? "true" : "false");
+  fprintf(f, "    \"objects\": [");
+  for (int i = 0; i < log->num_entries; i++) {
+    WriteJsonRoomEntry(f, log, i);
+    if (i + 1 < log->num_entries)
+      fputc(',', f);
+  }
+  fprintf(f, "\n    ],\n");
+
+  fprintf(f, "    \"warnings\": [");
+  bool first = true;
+  if (log->overflow)
+    fprintf(f, "\"log overflow: some entries or cells are missing\""), first = false;
+  if (!log->ram_restored)
+    fprintf(f, "%s\"g_ram was not restored after the replay\"", first ? "" : ", "), first = false;
+  for (int i = 0; i < log->num_entries; i++) {
+    if (log->entries[i].change_count == 0)
+      fprintf(f, "%s\"entry %d changed no cells\"", first ? "" : ", ", i), first = false;
+  }
+  fprintf(f, "],\n");
+
+  // owner: per cell, the last entry that changed it (-1 = none, i.e. floor fill)
+  fprintf(f, "    \"owner\": {");
+  for (int layer = 0; layer < 2; layer++) {
+    fprintf(f, "%s\n      \"bg%d\": [", layer ? "," : "", layer + 1);
+    for (int i = 0; i < kRoomLogCells; i++)
+      fprintf(f, "%s%s%d", i ? "," : "", (i & 63) ? "" : "\n        ", log->owner[layer][i]);
+    fprintf(f, "\n      ]");
+  }
+  fprintf(f, "\n    },\n");
+
+  // changed_since_load: cells of the dumped frame that differ from the replayed load
+  // (lifted pots, opened chests and doors, overlays...). Empty right after entering a room.
+  static uint16 diff[2 * kRoomLogCells];
+  int n = 0;
+  for (int layer = 0; layer < 2; layer++) {
+    for (int i = 0; i < kRoomLogCells; i++) {
+      if (log->live[layer][i] != log->loaded[layer][i])
+        diff[n++] = layer << 12 | i;
+    }
+  }
+  fprintf(f, "    \"changed_since_load\": { \"bg1\": ");
+  WriteJsonRuns(f, diff, n, 0);
+  fprintf(f, ", \"bg2\": ");
+  WriteJsonRuns(f, diff, n, 1);
+  fprintf(f, " }\n  },\n");
+}
+
 static bool WriteFrameJson(const char *filename, const char *warning, int width, int height, int render_scale) {
   FILE *f = fopen(filename, "w");
   if (!f)
@@ -223,7 +475,7 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   int room = dungeon_room_index;
 
   fprintf(f, "{\n");
-  fprintf(f, "  \"version\": 2,\n");
+  fprintf(f, "  \"version\": 3,\n");
   fprintf(f, "  \"frame\": %d,\n", frame_ctr_dbg);
   fprintf(f, "  \"module\": %d, \"submodule\": %d,\n", main_module_index, submodule_index);
   fprintf(f, "  \"indoors\": %s,\n", player_is_indoors ? "true" : "false");
@@ -259,6 +511,7 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   fprintf(f, "  \"tile_format\": \"bits 0-9 tile, 10-12 paleta, 13 prioridad, 14 hflip, 15 vflip\",\n");
   WriteJsonAtlas(f, "atlas", "tiles.png", kDumpBgTiles, kDumpBgTileVram, 0);
   WriteJsonAtlas(f, "sprites_atlas", "sprites.png", kDumpObjTiles, kDumpObjTileVram, 128);
+  WriteJsonRoomObjects(f);
   WriteJsonOam(f);
   fprintf(f, "}\n");
   return fclose(f) == 0;
@@ -291,6 +544,7 @@ void FrameDump_Write(const uint8 *pixels, int width, int height, int pitch, int 
   errors += !WriteTileAtlasPng(DUMP_DIR "/sprites.png", kDumpObjTileVram, kDumpObjTiles, 128);
   // Written last, so a complete frame.json means the other files are done too.
   errors += !WriteFrameJson(DUMP_DIR "/frame.json", warning, width, height, render_scale);
+  g_room_log.valid = false;  // the next dump replays the room again
 
   if (errors)
     fprintf(stderr, "*** Frame dump: %d file(s) could not be written to " DUMP_DIR "/\n", errors);

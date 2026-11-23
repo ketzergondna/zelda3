@@ -15,6 +15,7 @@
 #include "tagalong.h"
 #include "messaging.h"
 #include "assets.h"
+#include "frame_dump.h"
 
 // todo: move to config
 static const uint16 kBossRooms[] = {
@@ -2616,24 +2617,33 @@ void Dungeon_LoadRoom() {  // 81873a
   const uint8 *cur_p1 = GetDefaultRoomLayout(dung_layout_and_starting_quadrant >> 2);
 
   dung_load_ptr_offs = 0;
+  if (g_room_log_active) RoomLog_SetPass(kRoomLogPass_Layout);
   RoomDraw_DrawAllObjects(cur_p1);
 
   dung_load_ptr_offs = old_offs + 1;
 
+  if (g_room_log_active) RoomLog_SetPass(kRoomLogPass_Layer1);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 1 objects to BG2
   dung_load_ptr_offs += 2;
 
   memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG2, 33);
+  if (g_room_log_active) RoomLog_SetPass(kRoomLogPass_Layer2);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 2 objects to BG2
   dung_load_ptr_offs += 2;
 
   memcpy(&dung_line_ptrs_row0, kDungeon_DrawObjectOffsets_BG1, 33);
+  if (g_room_log_active) RoomLog_SetPass(kRoomLogPass_Layer3);
   RoomDraw_DrawAllObjects(cur_p0);  // Draw Layer 3 objects to BG2
+
+  if (g_room_log_active) RoomLog_SetPass(kRoomLogPass_Extra);
 
   for (dung_load_ptr_offs = 0; dung_load_ptr_offs != 0x18C; dung_load_ptr_offs += 4) {
     MovableBlockData m = movable_block_datas[dung_load_ptr_offs >> 2];
-    if (m.room == dungeon_room_index)
+    if (m.room == dungeon_room_index) {
+      if (g_room_log_active) RoomLog_Begin(kRoomLog_Block, (const uint8 *)&m.tilemap, 2);
       DrawObjects_PushableBlock(m.tilemap, dung_load_ptr_offs);
+      if (g_room_log_active) RoomLog_End();
+    }
   }
 
   uint16 t;
@@ -2647,7 +2657,9 @@ void Dungeon_LoadRoom() {  // 81873a
       do {
         t = dung_torch_data[i >> 1];
         i += 2;
+        if (g_room_log_active) RoomLog_Begin(kRoomLog_Torch, (const uint8 *)&t, 2);
         DrawObjects_LightableTorch(t, i - 2);
+        if (g_room_log_active) RoomLog_End();
       } while (dung_torch_data[i >> 1] != 0xffff);
       break;
     }
@@ -2669,14 +2681,18 @@ void RoomDraw_DrawAllObjects(const uint8 *level_data) {  // 8188e4
       return;
     if (d == 0xfff0)
       break;
+    if (g_room_log_active) RoomLog_Begin(kRoomLog_Object, level_data + dung_load_ptr_offs, 3);
     RoomData_DrawObject(d, level_data);
+    if (g_room_log_active) RoomLog_End();
   }
   for (;;) {
     dung_load_ptr_offs += 2;
     uint16 d = WORD(level_data[dung_load_ptr_offs]);
     if (d == 0xffff)
       return;
+    if (g_room_log_active) RoomLog_Begin(kRoomLog_Door, level_data + dung_load_ptr_offs, 2);
     RoomData_DrawObject_Door(d);
+    if (g_room_log_active) RoomLog_End();
   }
 }
 
