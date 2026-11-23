@@ -481,6 +481,10 @@ int main(int argc, char** argv) {
 
     SDL_LockMutex(g_audio_mutex);
     bool is_replay = ZeldaRunFrame(inputs);
+    // The room object replay touches g_ram (and restores it), so it runs here,
+    // between game frames and with the audio mutex held.
+    if (FrameDump_IsPending())
+      FrameDump_CaptureRoomObjects();
     SDL_UnlockMutex(g_audio_mutex);
 
     frameCtr++;
