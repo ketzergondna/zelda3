@@ -500,9 +500,15 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   fprintf(f, "  \"link\": { \"x\": %d, \"y\": %d, \"z\": %d, \"facing\": %d, \"layer\": \"%s\", \"lower_level\": %d },\n",
           link_x_coord, link_y_coord, (int16)link_z_coord, link_direction_facing,
           link_is_on_lower_level ? "bg1" : "bg2", link_is_on_lower_level);
-  fprintf(f, "  \"room_header\": { \"collision\": %d, \"bg2_properties\": %d, \"floor_offs\": [%d, %d], \"staircase\": %d },\n",
+  // blockset: byte 2 of the room header (aux_tile_theme_index, see Dungeon_LoadHeader).
+  // Optional field added to version 3; null outdoors, where that byte means something else.
+  fprintf(f, "  \"room_header\": { \"collision\": %d, \"bg2_properties\": %d, \"floor_offs\": [%d, %d], \"staircase\": %d, ",
           dung_hdr_collision, dung_hdr_bg2_properties, (int16)dung_floor_x_offs, (int16)dung_floor_y_offs,
           kind_of_in_room_staircase);
+  if (player_is_indoors)
+    fprintf(f, "\"blockset\": %d },\n", aux_tile_theme_index);
+  else
+    fprintf(f, "\"blockset\": null },\n");
   fprintf(f, "  \"cgram\": ");
   WriteJsonArray(f, ppu->cgram, 2, 256, 16, "  ");
   fprintf(f, ",\n");
