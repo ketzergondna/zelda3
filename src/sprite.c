@@ -13,6 +13,7 @@
 #include "tile_detect.h"
 #include "sprite_main.h"
 #include "assets.h"
+#include "frame_dump.h"
 static const uint16 kOamGetBufferPos_Tab0[6] = {0x171, 0x201, 0x31, 0xc1, 0x141, 0x1d1};
 static const uint16 kOamGetBufferPos_Tab1[48] = {
    0x30,  0x50,  0x80,  0xb0,  0xe0, 0x110, 0x140, 0x170, 0x1d0, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f0, 0x1f8,
@@ -1209,7 +1210,16 @@ void Sprite_Get16BitCoords(int k) {  // 8684c1
   cur_sprite_y = sprite_y_lo[k] | sprite_y_hi[k] << 8;
 }
 
-void Sprite_ExecuteSingle(int k) {  // 8684e2
+static void Sprite_ExecuteSingle_Body(int k);
+
+// OAM owner hooks for the 3D viewer (see frame_dump.h): only read g_ram.
+void Sprite_ExecuteSingle(int k) {
+  OamOwner_Push(kOamOwner_Sprite, k, sprite_type[k]);
+  Sprite_ExecuteSingle_Body(k);
+  OamOwner_Pop();
+}
+
+static void Sprite_ExecuteSingle_Body(int k) {  // 8684e2
   uint8 st = sprite_state[k];
   if (st != 0)
     Sprite_TimersAndOam(k);
@@ -1518,7 +1528,15 @@ void Sprite_PrepAndDrawSingleLargeNoPrep(int k, PrepOamCoordsRet *info) {  // 86
     SpriteDraw_Shadow(k, info);
 }
 
-void SpriteDraw_Shadow_custom(int k, PrepOamCoordsRet *info, uint8 a) {  // 86dc5c
+static void SpriteDraw_Shadow_custom_Body(int k, PrepOamCoordsRet *info, uint8 a);
+
+void SpriteDraw_Shadow_custom(int k, PrepOamCoordsRet *info, uint8 a) {
+  OamOwner_PushPart(kOamPart_Shadow);
+  SpriteDraw_Shadow_custom_Body(k, info, a);
+  OamOwner_Pop();
+}
+
+static void SpriteDraw_Shadow_custom_Body(int k, PrepOamCoordsRet *info, uint8 a) {  // 86dc5c
   uint16 y = Sprite_GetY(k) + a;
   info->y = y;
   if (sprite_pause[k] || sprite_state[k] == 10 && sprite_unk3[k] == 3)

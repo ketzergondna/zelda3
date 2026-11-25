@@ -9,6 +9,7 @@
 #include "dungeon.h"
 #include "snes/ppu.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -59,6 +60,100 @@ void FrameDump_Request() {
 
 bool FrameDump_IsPending() {
   return g_frame_dump_pending;
+}
+
+// ---- OAM owners (see frame_dump.h) ----
+enum { kOamOwnerMaxDepth = 8 };
+typedef struct OamOwnerScope {
+  OamOwnerEntry owner;
+  uint32 start;      // stamp when the scope began
+  uint8 oam[0x200];  // copy of oam_buf (128 entries of 4 bytes)
+  uint8 ext[0x80];   // copy of bytewise_extended_oam
+} OamOwnerScope;
+static bool g_oam_owner_enabled, g_oam_owner_valid;
+static OamOwnerEntry g_oam_owner[128];
+static uint32 g_oam_owner_stamp[128];
+static uint32 g_oam_owner_seq;
+static OamOwnerScope g_oam_owner_stack[kOamOwnerMaxDepth];
+static int g_oam_owner_depth;
+
+void OamOwner_SetEnabled(bool on) {
+  g_oam_owner_enabled = on;
+}
+
+bool OamOwner_IsEnabled() {
+  return g_oam_owner_enabled;
+}
+
+bool OamOwner_IsValid() {
+  return g_oam_owner_valid;
+}
+
+const OamOwnerEntry *OamOwner_Entries() {
+  return g_oam_owner;
+}
+
+void OamOwner_BeginFrame() {
+  g_oam_owner_valid = g_oam_owner_enabled;
+  if (!g_oam_owner_enabled)
+    return;
+  memset(g_oam_owner, 0, sizeof(g_oam_owner));  // kOamOwner_Other, body
+  memset(g_oam_owner_stamp, 0, sizeof(g_oam_owner_stamp));
+  g_oam_owner_seq = 0;
+  g_oam_owner_depth = 0;
+}
+
+static void OamOwner_PushEntry(OamOwnerEntry owner) {
+  if (!g_oam_owner_enabled)
+    return;
+  if (g_oam_owner_depth++ >= kOamOwnerMaxDepth)
+    return;  // too deep: the outer scope gets these entries
+  OamOwnerScope *sc = &g_oam_owner_stack[g_oam_owner_depth - 1];
+  sc->owner = owner;
+  sc->start = ++g_oam_owner_seq;
+  memcpy(sc->oam, &g_ram[0x800], sizeof(sc->oam));
+  memcpy(sc->ext, bytewise_extended_oam, sizeof(sc->ext));
+}
+
+void OamOwner_Push(int kind, int index, int type) {
+  OamOwnerEntry owner = { (uint8)kind, (uint8)index, kOamPart_Body, (uint8)type };
+  OamOwner_PushEntry(owner);
+}
+
+void OamOwner_PushPart(int part) {
+  if (!g_oam_owner_enabled)
+    return;
+  int top = g_oam_owner_depth < kOamOwnerMaxDepth ? g_oam_owner_depth : kOamOwnerMaxDepth;
+  OamOwnerEntry owner = { kOamOwner_Other, 0, kOamPart_Body, 0 };
+  if (top > 0)
+    owner = g_oam_owner_stack[top - 1].owner;
+  owner.part = (uint8)part;
+  OamOwner_PushEntry(owner);
+}
+
+void OamOwner_Pop() {
+  if (!g_oam_owner_enabled || g_oam_owner_depth == 0)
+    return;
+  if (--g_oam_owner_depth >= kOamOwnerMaxDepth)
+    return;
+  const OamOwnerScope *sc = &g_oam_owner_stack[g_oam_owner_depth];
+  for (int i = 0; i < 128; i++) {
+    if (g_oam_owner_stamp[i] > sc->start)
+      continue;  // claimed by a scope nested in this one
+    if (memcmp(&g_ram[0x800 + i * 4], &sc->oam[i * 4], 4) == 0 && bytewise_extended_oam[i] == sc->ext[i])
+      continue;  // this scope didn't write it
+    g_oam_owner[i] = sc->owner;
+    g_oam_owner_stamp[i] = ++g_oam_owner_seq;
+  }
+}
+
+bool FrameDump_WantsOamOwners() {
+  static int env = -1;
+  if (env < 0) {
+    const char *v = getenv("ZELDA3_OAM_OWNERS");
+    env = !(v && v[0] == '0');
+  }
+  return g_frame_dump_pending && env;
 }
 
 uint8 *FrameDump_GetScreenBuffer(int width, int height) {
@@ -320,6 +415,43 @@ static void WriteJsonAtlas(FILE *f, const char *name, const char *file, int num_
           num_tiles, vram_word, cgram_base);
 }
 
+static const char *const kOamOwnerNames[5] = { "other", "link", "sprite", "ancilla", "follower" };
+
+// Live entities that can draw sprites, read from g_ram: Link, the 16 sprite
+// slots and the 10 ancilla slots in use, and the follower. x and y are world
+// pixels; z is the height above the floor (0-255 for sprites and ancillas).
+static void WriteJsonActors(FILE *f) {
+  fprintf(f, "  \"actors\": {\n");
+  fprintf(f, "    \"link\": { \"x\": %d, \"y\": %d, \"z\": %d, \"floor\": %d },\n",
+          link_x_coord, link_y_coord, (int16)link_z_coord, link_is_on_lower_level);
+  fprintf(f, "    \"sprites\": [");
+  bool first = true;
+  for (int k = 0; k < 16; k++) {
+    if (sprite_state[k] == 0)
+      continue;
+    fprintf(f, "%s\n      { \"index\": %d, \"type\": %d, \"state\": %d, \"x\": %d, \"y\": %d, \"z\": %d, \"floor\": %d }",
+            first ? "" : ",", k, sprite_type[k], sprite_state[k], sprite_x_lo[k] | sprite_x_hi[k] << 8,
+            sprite_y_lo[k] | sprite_y_hi[k] << 8, sprite_z[k], sprite_floor[k]);
+    first = false;
+  }
+  fprintf(f, "%s],\n    \"ancillas\": [", first ? "" : "\n    ");
+  first = true;
+  for (int k = 0; k < 10; k++) {
+    if (ancilla_type[k] == 0)
+      continue;
+    fprintf(f, "%s\n      { \"index\": %d, \"type\": %d, \"x\": %d, \"y\": %d, \"z\": %d, \"floor\": %d }",
+            first ? "" : ",", k, ancilla_type[k], ancilla_x_lo[k] | ancilla_x_hi[k] << 8,
+            ancilla_y_lo[k] | ancilla_y_hi[k] << 8, ancilla_z[k], ancilla_floor[k]);
+    first = false;
+  }
+  fprintf(f, "%s],\n", first ? "" : "\n    ");
+  if (follower_indicator)
+    fprintf(f, "    \"follower\": { \"type\": %d }\n", follower_indicator);
+  else
+    fprintf(f, "    \"follower\": null\n");
+  fprintf(f, "  },\n");
+}
+
 static void WriteJsonOam(FILE *f) {
   const Ppu *ppu = g_zenv.ppu;
   const uint16 *oam = ppu->oam;
@@ -335,10 +467,18 @@ static void WriteJsonOam(FILE *f) {
     if (x >= 256 + ppu->extraLeftRight)
       x -= 512;  // same wrap as the PPU
     fprintf(f, "%s\n    { \"i\": %d, \"x\": %d, \"y\": %d, \"tile\": %d, \"bank\": %d, \"palette\": %d, "
-            "\"priority\": %d, \"hflip\": %s, \"vflip\": %s, \"size\": %d }",
+            "\"priority\": %d, \"hflip\": %s, \"vflip\": %s, \"size\": %d, \"owner\": ",
             first ? "" : ",", i, x, y, w1 & 0xff, (w1 >> 8) & 1, (w1 >> 9) & 7, (w1 >> 12) & 3,
             (w1 & 0x4000) ? "true" : "false", (w1 & 0x8000) ? "true" : "false",
             kDumpSpriteSizes[ppu->objSize & 7][(high >> 1) & 1]);
+    if (OamOwner_IsValid()) {
+      const OamOwnerEntry *o = &OamOwner_Entries()[i];
+      fprintf(f, "{ \"kind\": \"%s\", \"index\": %d, \"type\": %d, \"part\": \"%s\" } }",
+              kOamOwnerNames[o->kind < 5 ? o->kind : 0], o->index, o->type,
+              o->part == kOamPart_Shadow ? "shadow" : "body");
+    } else {
+      fprintf(f, "null }");
+    }
     first = false;
   }
   fprintf(f, "\n  ]\n");
@@ -475,7 +615,7 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   int room = dungeon_room_index;
 
   fprintf(f, "{\n");
-  fprintf(f, "  \"version\": 3,\n");
+  fprintf(f, "  \"version\": 4,\n");
   fprintf(f, "  \"frame\": %d,\n", frame_ctr_dbg);
   fprintf(f, "  \"module\": %d, \"submodule\": %d,\n", main_module_index, submodule_index);
   fprintf(f, "  \"indoors\": %s,\n", player_is_indoors ? "true" : "false");
@@ -518,6 +658,7 @@ static bool WriteFrameJson(const char *filename, const char *warning, int width,
   WriteJsonAtlas(f, "atlas", "tiles.png", kDumpBgTiles, kDumpBgTileVram, 0);
   WriteJsonAtlas(f, "sprites_atlas", "sprites.png", kDumpObjTiles, kDumpObjTileVram, 128);
   WriteJsonRoomObjects(f);
+  WriteJsonActors(f);
   WriteJsonOam(f);
   fprintf(f, "}\n");
   return fclose(f) == 0;

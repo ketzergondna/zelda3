@@ -480,6 +480,9 @@ int main(int argc, char** argv) {
     inputs |= g_gamepad_buttons;
 
     SDL_LockMutex(g_audio_mutex);
+    // OAM owners: only for the frame that will be dumped, for now (phase 4 can
+    // turn them on for every frame).
+    OamOwner_SetEnabled(FrameDump_WantsOamOwners());
     bool is_replay = ZeldaRunFrame(inputs);
     // The room object replay touches g_ram (and restores it), so it runs here,
     // between game frames and with the audio mutex held.

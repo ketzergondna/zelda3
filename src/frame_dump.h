@@ -42,4 +42,42 @@ void RoomLog_SetPass(int pass);
 void RoomLog_Begin(int kind, const uint8 *raw, int len);
 void RoomLog_End();
 
+// OAM owners (frame.json version 4): which entity wrote each OAM entry in the
+// game frame. While enabled, the hooks below take a copy of the OAM buffer when
+// an entity starts drawing and, when it ends, give it the entries that changed
+// (a nested scope keeps the entries it claimed). They only read g_ram and write
+// to arrays of their own, so the game runs exactly the same with or without
+// them. For now it's only enabled on the frame before a dump (FrameDump_
+// WantsOamOwners); phase 4 (live UDP) can enable it on every frame with
+// OamOwner_SetEnabled(true) and read OamOwner_Entries() after each frame.
+enum {
+  kOamOwner_Other,     // written outside any hooked scope (or not written)
+  kOamOwner_Link,
+  kOamOwner_Sprite,    // index = sprite slot k (0-15), type = sprite_type[k]
+  kOamOwner_Ancilla,   // index = ancilla slot k (0-9), type = ancilla type
+  kOamOwner_Follower,  // type = follower_indicator
+};
+enum {
+  kOamPart_Body,
+  kOamPart_Shadow,
+};
+typedef struct OamOwnerEntry {
+  uint8 kind, index, part;
+  uint8 type;
+} OamOwnerEntry;
+void OamOwner_SetEnabled(bool on);
+bool OamOwner_IsEnabled();
+// True if the owners were recorded for the last game frame (the 128 entries).
+bool OamOwner_IsValid();
+const OamOwnerEntry *OamOwner_Entries();
+// Hooks. BeginFrame runs where the game clears the OAM buffer.
+void OamOwner_BeginFrame();
+void OamOwner_Push(int kind, int index, int type);
+void OamOwner_PushPart(int part);  // same owner as the current scope
+void OamOwner_Pop();
+// The dump wants the owners of the next frame (a dump is pending), unless the
+// environment variable ZELDA3_OAM_OWNERS=0 turns them off (for testing that the
+// game runs the same with and without them).
+bool FrameDump_WantsOamOwners();
+
 #endif  // ZELDA3_FRAME_DUMP_H_

@@ -4,6 +4,7 @@
 #include "hud.h"
 #include "load_gfx.h"
 #include "tagalong.h"
+#include "frame_dump.h"
 #include "overworld.h"
 #include "tile_detect.h"
 #include "player.h"
@@ -666,7 +667,16 @@ void Ancilla_ExecuteAll() {  // 88832b
   }
 }
 
-void Ancilla_ExecuteOne(uint8 type, int k) {  // 88833c
+static void Ancilla_ExecuteOne_Body(uint8 type, int k);
+
+// OAM owner hooks for the 3D viewer (see frame_dump.h): only read g_ram.
+void Ancilla_ExecuteOne(uint8 type, int k) {
+  OamOwner_Push(kOamOwner_Ancilla, k, type);
+  Ancilla_ExecuteOne_Body(type, k);
+  OamOwner_Pop();
+}
+
+static void Ancilla_ExecuteOne_Body(uint8 type, int k) {  // 88833c
   if (k < 6) {
     ancilla_oam_idx[k] = Ancilla_AllocateOamFromRegion_A_or_D_or_F(k, ancilla_numspr[k]);
   }

@@ -4,6 +4,7 @@
 #include "snes/snes_regs.h"
 #include "player.h"
 #include "misc.h"
+#include "frame_dump.h"
 
 static const int8 kPlayerOam_StairsOffsY[] = {
   0, -2, -3, 0, -2, -3, 0, 0, 0, 0, 0, 0, 0, -2, -3, 0,
@@ -759,7 +760,16 @@ void CalculateSwordHitBox() {  // 879e63
   player_oam_x_offset = kSwordOamXOffs[i];
 }
 
-void LinkOam_Main() {  // 8da18e
+static void LinkOam_Main_Body();
+
+// OAM owner hooks for the 3D viewer (see frame_dump.h): only read g_ram.
+void LinkOam_Main() {
+  OamOwner_Push(kOamOwner_Link, 0, 0);
+  LinkOam_Main_Body();
+  OamOwner_Pop();
+}
+
+static void LinkOam_Main_Body() {  // 8da18e
   uint16 y_coord_backup = link_y_coord;
 
   if (submodule_index == 18 || submodule_index == 19) {
@@ -1046,6 +1056,7 @@ continue_after_set:
         }
       } else {
         // draw shadow
+        OamOwner_PushPart(kOamPart_Shadow);
         int shadow_idx = (link_auxiliary_state != 0) && (link_auxiliary_state != 1 || !link_cape_mode);
         uint16 oam_y = link_y_coord - BG2VOFS_copy2 + kOffsToShadowGivenDir_Y[link_direction_facing_mirror >> 1];
         if (oam_y < 256) {
@@ -1062,6 +1073,7 @@ continue_after_set:
           bytewise_extended_oam[oam_pos+0] = 0;
           bytewise_extended_oam[oam_pos+1] = 0;
         }
+        OamOwner_Pop();
       }
     }
   }
@@ -1214,6 +1226,7 @@ void LinkOam_UnusedWeaponSettings(int r4loc, uint8 oam_x, uint8 oam_y) {  // 8da
 }
 
 void LinkOam_DrawDungeonFallShadow(int r4loc, uint8 xcoord) {  // 8dae3b
+  OamOwner_PushPart(kOamPart_Shadow);
   uint8 yd = tiledetect_which_y_pos[0] - 12 - link_y_coord;
   int yv = yd >= 240 ? 0 :
            yd >= 96 ? 2 :
@@ -1233,6 +1246,7 @@ void LinkOam_DrawDungeonFallShadow(int r4loc, uint8 xcoord) {  // 8dae3b
     bytewise_extended_oam[oam_pos] = 0;
     xcoord += 8;
   }
+  OamOwner_Pop();
 }
 
 void LinkOam_DrawFootObject(int r4loc, uint8 oam_x, uint8 oam_y) {  // 8daed1
