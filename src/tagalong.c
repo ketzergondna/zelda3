@@ -1,4 +1,5 @@
 #include "tagalong.h"
+#include "frame_dump.h"
 #include "sprite_main.h"
 #include "sprite.h"
 #include "zelda_rtl.h"
@@ -582,7 +583,16 @@ void Follower_HandleTrigger() {  // 89a59e
   } while (++tmi != tmi_end);
 }
 
-void Tagalong_Draw() {  // 89a907
+static void Tagalong_Draw_Body();
+
+// OAM owner hooks for the 3D viewer (see frame_dump.h): only read g_ram.
+void Tagalong_Draw() {
+  OamOwner_Push(kOamOwner_Follower, 0, follower_indicator);
+  Tagalong_Draw_Body();
+  OamOwner_Pop();
+}
+
+static void Tagalong_Draw_Body() {  // 89a907
   if (tagalong_var5)
     return;
   oam_priority_value =

@@ -11,6 +11,7 @@
 #include "util.h"
 #include "audio.h"
 #include "assets.h"
+#include "frame_dump.h"
 ZeldaEnv g_zenv;
 uint8 g_ram[131072];
 
@@ -252,6 +253,7 @@ static void ZeldaInitializationCode() {
 static void ClearOamBuffer() {  // 80841e
   for (int i = 0; i < 128; i++)
     oam_buf[i].y = 0xf0;
+  OamOwner_BeginFrame();  // OAM owners for the 3D viewer (only reads g_ram)
 }
 
 static void ZeldaRunGameLoop() {
