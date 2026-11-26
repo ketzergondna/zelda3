@@ -27,6 +27,7 @@
 #include "util.h"
 #include "audio.h"
 #include "frame_dump.h"
+#include "live_udp.h"
 
 static bool g_run_without_emu = 0;
 
@@ -327,6 +328,7 @@ int main(int argc, char** argv) {
                        g_config.no_sprite_limits * kPpuRenderFlags_NoSpriteLimits;
   ZeldaEnableMsu(g_config.enable_msu);
   ZeldaSetLanguage(g_config.language);
+  LiveUdp_Init(g_config.live_udp, g_config.live_udp_port);
 
   if (g_config.fullscreen == 1)
     g_win_flags ^= SDL_WINDOW_FULLSCREEN_DESKTOP;
@@ -480,9 +482,9 @@ int main(int argc, char** argv) {
     inputs |= g_gamepad_buttons;
 
     SDL_LockMutex(g_audio_mutex);
-    // OAM owners: only for the frame that will be dumped, for now (phase 4 can
-    // turn them on for every frame).
-    OamOwner_SetEnabled(FrameDump_WantsOamOwners());
+    // OAM owners: for the frame that will be dumped and, with live sprites on
+    // ([Viewer] LiveUdp), for every frame. They only read memory.
+    OamOwner_SetEnabled(FrameDump_WantsOamOwners() || LiveUdp_IsEnabled());
     bool is_replay = ZeldaRunFrame(inputs);
     // The room object replay touches g_ram (and restores it), so it runs here,
     // between game frames and with the audio mutex held.
@@ -497,6 +499,7 @@ int main(int argc, char** argv) {
     }
 
     DrawPpuFrameWithPerf();
+    LiveUdp_SendFrame();  // live sprites for the 3D viewer (does nothing if off)
 
     if (g_config.display_perf_title) {
       char title[60];
@@ -539,6 +542,7 @@ int main(int argc, char** argv) {
   g_renderer_funcs.Destroy();
 
   SDL_DestroyWindow(window);
+  LiveUdp_Shutdown();
   SDL_Quit();
   //SaveConfigFile();
   return 0;

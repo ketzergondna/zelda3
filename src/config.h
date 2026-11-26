@@ -69,6 +69,9 @@ typedef struct Config {
   bool disable_frame_delay;
   uint8 msuvolume;
   uint32 features0;
+  // [Viewer] (3D viewer): live sprites over UDP (live_udp.c). They only read memory.
+  bool live_udp;
+  int live_udp_port;
 
   const char *link_graphics;
   char *memory_buffer;

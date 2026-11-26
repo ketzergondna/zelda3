@@ -175,6 +175,9 @@
     <ClCompile Include="src\frame_dump.c">
       <Filter>Zelda</Filter>
     </ClCompile>
+    <ClCompile Include="src\live_udp.c">
+      <Filter>Zelda</Filter>
+    </ClCompile>
     <ClCompile Include="src\glsl_shader.c">
       <Filter>Zelda</Filter>
     </ClCompile>
@@ -379,6 +382,9 @@
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\frame_dump.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
+    <ClInclude Include="src\live_udp.h">
       <Filter>Zelda</Filter>
     </ClInclude>
     <ClInclude Include="src\glsl_shader.h">

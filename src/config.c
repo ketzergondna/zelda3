@@ -280,6 +280,8 @@ static int GetIniSection(const char *s) {
     return 4;
   if (StringEqualsNoCase(s, "[GamepadMap]"))
     return 5;
+  if (StringEqualsNoCase(s, "[Viewer]"))
+    return 6;
   return -1;
 }
 
@@ -314,6 +316,16 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
 }
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
+  if (section == 6) {
+    // [Viewer]: options for the 3D viewer that only read memory (see live_udp.h).
+    if (StringEqualsNoCase(key, "LiveUdp")) {
+      return ParseBool(value, &g_config.live_udp);
+    } else if (StringEqualsNoCase(key, "LiveUdpPort")) {
+      g_config.live_udp_port = (int)strtol(value, (char**)NULL, 10);
+      return g_config.live_udp_port > 0 && g_config.live_udp_port <= 65535;
+    }
+    return false;
+  }
   if (section == 0) {
     for (int i = 0; i < countof(kKeyNameId); i++) {
       if (StringEqualsNoCase(key, kKeyNameId[i].name)) {
