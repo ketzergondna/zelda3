@@ -480,6 +480,8 @@ static bool HandleIniConfig(int section, const char *key, char *value) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_SkipIntroOnKeypress);
     } else if (StringEqualsNoCase(key, "SkipIntroToTitle")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_SkipIntroToTitle);
+    } else if (StringEqualsNoCase(key, "DebugNoTelepathy")) {
+      return ParseBoolBit(value, &g_config.features0, kFeatures0_DebugNoTelepathy);
     } else if (StringEqualsNoCase(key, "ShowMaxItemsInYellow")) {
       return ParseBoolBit(value, &g_config.features0, kFeatures0_ShowMaxItemsInYellow);
     } else if (StringEqualsNoCase(key, "MoreActiveBombs")) {
