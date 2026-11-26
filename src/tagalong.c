@@ -238,7 +238,11 @@ void Follower_Main() {  // 899fc4
     return;
   }
   int j = FindInByteArray(kTagalong_Tab0, follower_indicator, 3);
-  if (j >= 0 && submodule_index == 0 && !(j == 2 && overworld_screen_index & 0x40) && sign16(--word_7E02CD)) {
+  // DebugNoTelepathy: the timer of follower 5 (Zelda's telepathy) doesn't run, so its
+  // message never fires. With the option off this check is always true (same as before).
+  bool telepathy_off = (j == 0 && (enhanced_features0 & kFeatures0_DebugNoTelepathy));
+  if (j >= 0 && submodule_index == 0 && !(j == 2 && overworld_screen_index & 0x40) &&
+      !telepathy_off && sign16(--word_7E02CD)) {
     if (!Follower_ValidateMessageFreedom()) {
       word_7E02CD = 0;
     } else {

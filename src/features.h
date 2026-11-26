@@ -56,6 +56,10 @@ enum {
 
   // A key press during the intro animation jumps to the finished title screen
   kFeatures0_SkipIntroToTitle = 1048576,
+
+  // Debug for the 3D viewer: Zelda's telepathic reminder (the timed message of the
+  // invisible follower 5) never fires. Changes game behavior, off by default.
+  kFeatures0_DebugNoTelepathy = 2097152,
 };
 
 #define enhanced_features0 (*(uint32*)(g_ram+0x64c))
